@@ -43,7 +43,7 @@ async function run({ VocabItem, User, send, now = new Date(), appUrl = process.e
 }
 
 function makeSender() {
-  if (!process.env.SMTP_URL) {
+  if (!process.env.SMTP_URL || process.env.SMTP_URL === 'dry-run') {
     return async (mail) => logger.info('reviews_due_dry_run', { to: mail.to, subject: mail.subject });
   }
   const transport = require('nodemailer').createTransport(process.env.SMTP_URL);

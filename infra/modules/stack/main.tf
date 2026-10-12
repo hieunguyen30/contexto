@@ -7,6 +7,10 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 6.0"
     }
+    google-beta = {
+      source  = "hashicorp/google-beta"
+      version = "~> 6.0"
+    }
   }
 }
 
@@ -98,17 +102,34 @@ module "iam" {
     "${var.prefix}-worker"    = { display_name = "Contexto ingest worker", project_roles = ["roles/logging.logWriter"] }
     "${var.prefix}-frontend"  = { display_name = "Contexto web", project_roles = [] }
     "${var.prefix}-push"      = { display_name = "Pub/Sub push identity", project_roles = [] }
+    "${var.prefix}-build"     = { display_name = "Cloud Build deployer", project_roles = ["roles/logging.logWriter", "roles/run.developer", "roles/storage.objectViewer"] }
     "${var.prefix}-jobs"      = { display_name = "Contexto scheduled jobs", project_roles = ["roles/logging.logWriter"] }
     "${var.prefix}-scheduler" = { display_name = "Cloud Scheduler caller", project_roles = [] }
   }
   depends_on = [google_project_service.apis]
 }
 
+# Cloud Build deployer: push images, update Cloud Run, and act as the runtime accounts it deploys.
+resource "google_artifact_registry_repository_iam_member" "build_writer" {
+  project    = var.project_id
+  location   = var.region
+  repository = google_artifact_registry_repository.images.repository_id
+  role       = "roles/artifactregistry.writer"
+  member     = "serviceAccount:${local.sa["${var.prefix}-build"]}"
+}
+
+resource "google_service_account_iam_member" "build_acts_as" {
+  for_each           = toset(["backend", "worker", "frontend", "jobs"])
+  service_account_id = "projects/${var.project_id}/serviceAccounts/${local.sa["${var.prefix}-${each.key}"]}"
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${local.sa["${var.prefix}-build"]}"
+}
+
 module "secrets" {
   source     = "../secrets"
   project_id = var.project_id
   secrets = {
-    MONGODB_URI       = [local.sa["${var.prefix}-backend"], local.sa["${var.prefix}-worker"]]
+    MONGODB_URI       = [local.sa["${var.prefix}-backend"], local.sa["${var.prefix}-worker"], local.sa["${var.prefix}-jobs"]]
     OPENAI_API_KEY    = [local.sa["${var.prefix}-backend"], local.sa["${var.prefix}-worker"]]
     ANTHROPIC_API_KEY = [local.sa["${var.prefix}-backend"]]
     SMTP_URL          = [local.sa["${var.prefix}-jobs"]]
@@ -139,7 +160,7 @@ module "backend" {
   timeout_seconds       = 120
   deletion_protection   = var.deletion_protection
   env = {
-    CORS_ORIGIN         = local.frontend_url
+    CORS_ORIGIN         = "${local.frontend_url},${module.frontend.url}" # Cloud Run serves both URL forms
     PUBSUB_TOPIC        = "ingest-requests"
     AUTH_MODE           = "firebase"
     FIREBASE_PROJECT_ID = var.project_id

@@ -1,3 +1,11 @@
+terraform {
+  required_providers {
+    google-beta = {
+      source = "hashicorp/google-beta"
+    }
+  }
+}
+
 variable "project_id" { type = string }
 variable "push_endpoint" {
   description = "Worker URL that receives pushes (also used as OIDC audience)."
@@ -21,8 +29,15 @@ data "google_project" "this" {
   project_id = var.project_id
 }
 
+# The Pub/Sub service agent does not exist in a fresh project until something creates it.
+resource "google_project_service_identity" "pubsub" {
+  provider = google-beta
+  project  = var.project_id
+  service  = "pubsub.googleapis.com"
+}
+
 locals {
-  pubsub_agent = "serviceAccount:service-${data.google_project.this.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+  pubsub_agent = "serviceAccount:${google_project_service_identity.pubsub.email}"
 }
 
 resource "google_pubsub_topic" "ingest" {

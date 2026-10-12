@@ -1,19 +1,21 @@
-# Build -> push to Artifact Registry -> deploy both services to Cloud Run.
-# Run scripts/gcp-setup.sh once first (APIs, repo, service accounts, secrets).
+# Build -> push to Artifact Registry -> roll new images out to Cloud Run.
+#
+# Terraform (infra/) owns all configuration: service accounts, env vars, secrets, scaling, IAM, Pub/Sub.
+# This pipeline only ships images, so `gcloud run deploy` here passes nothing but --image.
+#
+# Run as the Terraform-created deployer account:
+#   gcloud builds submit --config cloudbuild.yaml \
+#     --service-account=projects/<project>/serviceAccounts/contexto-build@<project>.iam.gserviceaccount.com \
+#     --substitutions=SHORT_SHA=<sha>,_BACKEND_URL=<backend_url output>,_FIREBASE_API_KEY=...,_FIREBASE_AUTH_DOMAIN=...,_FIREBASE_APP_ID=...
 substitutions:
   _REGION: us-central1
   _REPO: contexto
-  # Used to derive the deterministic Cloud Run URLs (https://<svc>-<project-number>.<region>.run.app)
-  # so the frontend can be built with the API URL and the backend can allow the frontend origin.
-  _PROJECT_NUMBER: ''
-  _BACKEND_SA: contexto-backend
-  _FRONTEND_SA: contexto-frontend
-  _WORKER_SA: contexto-worker
-  # Firebase web config (public identifiers, not secrets); from Firebase console -> Project settings.
+  # `terraform output backend_url`; baked into the frontend bundle at build time.
+  _BACKEND_URL: ''
+  # Firebase web config (public identifiers, not secrets): Firebase console -> Project settings.
   _FIREBASE_API_KEY: ''
   _FIREBASE_AUTH_DOMAIN: ''
   _FIREBASE_APP_ID: ''
-  _RAW_TEXT_BUCKET: ''   # e.g. <project-id>-contexto-raw-text
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -22,6 +24,10 @@ steps:
   - id: build-backend
     name: gcr.io/cloud-builders/docker
     args: ['build', '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/backend:$SHORT_SHA', 'backend']
+  - id: build-worker
+    name: gcr.io/cloud-builders/docker
+    args: ['build', '-f', 'backend/worker/Dockerfile', '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/worker:$SHORT_SHA', 'backend']
+    waitFor: ['-']
   - id: build-frontend
     name: gcr.io/cloud-builders/docker
     args:
@@ -29,7 +35,7 @@ steps:
       - -t
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/frontend:$SHORT_SHA
       - --build-arg
-      - NEXT_PUBLIC_API_URL=https://contexto-backend-${_PROJECT_NUMBER}.${_REGION}.run.app
+      - NEXT_PUBLIC_API_URL=${_BACKEND_URL}
       - --build-arg
       - NEXT_PUBLIC_FIREBASE_API_KEY=${_FIREBASE_API_KEY}
       - --build-arg
@@ -40,18 +46,14 @@ steps:
       - NEXT_PUBLIC_FIREBASE_APP_ID=${_FIREBASE_APP_ID}
       - frontend
     waitFor: ['-']
-  - id: build-worker
-    name: gcr.io/cloud-builders/docker
-    args: ['build', '-f', 'backend/worker/Dockerfile', '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/worker:$SHORT_SHA', 'backend']
-    waitFor: ['-']
-  - id: push-worker
-    name: gcr.io/cloud-builders/docker
-    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/worker:$SHORT_SHA']
-    waitFor: ['build-worker']
   - id: push-backend
     name: gcr.io/cloud-builders/docker
     args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/backend:$SHORT_SHA']
     waitFor: ['build-backend']
+  - id: push-worker
+    name: gcr.io/cloud-builders/docker
+    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/worker:$SHORT_SHA']
+    waitFor: ['build-worker']
   - id: push-frontend
     name: gcr.io/cloud-builders/docker
     args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/frontend:$SHORT_SHA']
@@ -59,59 +61,25 @@ steps:
   - id: deploy-backend
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
-    args:
-      - run
-      - deploy
-      - contexto-backend
-      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/backend:$SHORT_SHA
-      - --region=${_REGION}
-      - --service-account=${_BACKEND_SA}@$PROJECT_ID.iam.gserviceaccount.com
-      - --allow-unauthenticated
-      - --update-env-vars=CORS_ORIGIN=https://contexto-frontend-${_PROJECT_NUMBER}.${_REGION}.run.app,PUBSUB_TOPIC=ingest-requests,AUTH_MODE=firebase,FIREBASE_PROJECT_ID=$PROJECT_ID,RAW_TEXT_BUCKET=${_RAW_TEXT_BUCKET}
-      - --update-secrets=MONGODB_URI=MONGODB_URI:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest,ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest
-    waitFor: ['push-backend']
-  - id: deploy-reviews-job
-    # Job itself (schedule, secrets, command) is defined in Terraform; this only ships the new image.
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    entrypoint: gcloud
-    args:
-      - run
-      - jobs
-      - update
-      - contexto-reviews-due
-      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/backend:$SHORT_SHA
-      - --region=${_REGION}
+    args: ['run', 'deploy', 'contexto-backend', '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/backend:$SHORT_SHA', '--region=${_REGION}']
     waitFor: ['push-backend']
   - id: deploy-worker
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
-    args:
-      - run
-      - deploy
-      - contexto-worker
-      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/worker:$SHORT_SHA
-      - --region=${_REGION}
-      - --service-account=${_WORKER_SA}@$PROJECT_ID.iam.gserviceaccount.com
-      - --no-allow-unauthenticated   # only the Pub/Sub push identity may invoke
-      - --timeout=300
-      - --concurrency=4
-      - --update-env-vars=RAW_TEXT_BUCKET=${_RAW_TEXT_BUCKET}
-      - --update-secrets=MONGODB_URI=MONGODB_URI:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest
+    args: ['run', 'deploy', 'contexto-worker', '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/worker:$SHORT_SHA', '--region=${_REGION}']
     waitFor: ['push-worker']
   - id: deploy-frontend
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
-    args:
-      - run
-      - deploy
-      - contexto-frontend
-      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/frontend:$SHORT_SHA
-      - --region=${_REGION}
-      - --service-account=${_FRONTEND_SA}@$PROJECT_ID.iam.gserviceaccount.com
-      - --allow-unauthenticated
+    args: ['run', 'deploy', 'contexto-frontend', '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/frontend:$SHORT_SHA', '--region=${_REGION}']
     waitFor: ['push-frontend']
+  - id: deploy-reviews-job
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args: ['run', 'jobs', 'update', 'contexto-reviews-due', '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/backend:$SHORT_SHA', '--region=${_REGION}']
+    waitFor: ['push-backend']
 
 images:
-  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/worker:$SHORT_SHA
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/backend:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/worker:$SHORT_SHA
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/frontend:$SHORT_SHA

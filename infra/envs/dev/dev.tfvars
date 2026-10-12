@@ -1,4 +1,4 @@
-project_id            = "contexto-dev" # REPLACE with your dev GCP project id
+project_id            = "contexto-5abe9"
 region                = "us-central1"
 backend_max_instances = 3
 worker_max_instances  = 3

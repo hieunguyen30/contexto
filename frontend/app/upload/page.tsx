@@ -16,7 +16,7 @@ export default function UploadPage() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    setStatus('Extracting and embedding — this can take 30s or more…');
+    setStatus('Queuing…');
     setSubmitting(true);
     try {
       const res = await ingestContent({
@@ -24,7 +24,8 @@ export default function UploadPage() {
         source_type: sourceType,
         target_language: targetLanguage.trim(),
       });
-      router.push(`/content/${res.content_id}`);
+      router.push('/dashboard'); // card shows live ingestion progress
+      void res;
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: string } }; message?: string };
       setError(err.response?.data?.error || err.message || 'Upload failed');
@@ -38,7 +39,7 @@ export default function UploadPage() {
     <main className="mx-auto max-w-2xl px-6 py-8">
       <h1 className="text-2xl font-semibold tracking-tight">Add content</h1>
       <p className="mt-1 text-sm text-slate-600">
-        Paste a YouTube video URL or an article URL. We&apos;ll extract the text, chunk it, and embed it.
+        Paste a YouTube video URL or an article URL. We&apos;ll process it in the background; progress shows on your dashboard.
       </p>
 
       <form onSubmit={submit} className="mt-6 space-y-4 rounded border border-slate-200 bg-white p-6">

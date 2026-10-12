@@ -13,7 +13,12 @@ api.interceptors.request.use((config) => {
 
 export type SourceType = 'youtube' | 'pdf' | 'article';
 
+export type IngestStatus = 'queued' | 'processing' | 'ready' | 'failed';
+
 export interface ContentItem {
+  status?: IngestStatus;
+  error?: string | null;
+  chunk_count?: number;
   _id: string;
   title: string;
   source_url?: string;
@@ -57,8 +62,21 @@ export async function ingestContent(input: {
   url: string;
   source_type: SourceType;
   target_language: string;
-}): Promise<{ content_id: string; chunk_count: number; preview: string }> {
+}): Promise<{ content_id: string; status: IngestStatus }> {
   const { data } = await api.post('/api/content/ingest', input);
+  return data;
+}
+
+export interface IngestStatusResponse {
+  content_id: string;
+  status: IngestStatus;
+  error: string | null;
+  chunk_count: number;
+  title: string;
+}
+
+export async function getContentStatus(id: string): Promise<IngestStatusResponse> {
+  const { data } = await api.get(`/api/content/${id}/status`);
   return data;
 }
 

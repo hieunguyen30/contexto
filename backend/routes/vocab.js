@@ -2,6 +2,7 @@ const express = require('express');
 const { Types } = require('mongoose');
 const { Content, VocabItem, User } = require('../models');
 const { claudeJson } = require('../services/claude');
+const { loadRawText } = require('../services/storage');
 const { updateSM2 } = require('../utils/sm2');
 
 const router = express.Router();
@@ -38,13 +39,13 @@ router.post('/extract', async (req, res, next) => {
     }
 
     const [content, user] = await Promise.all([
-      Content.findOne({ _id: content_id, user_id: userId }).lean(),
+      Content.findOne({ _id: content_id, user_id: userId }, { embeddings: 0 }).lean(),
       User.findById(userId).lean(),
     ]);
     if (!content) return res.status(404).json({ error: 'Content not found' });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const sourceText = content.raw_text || (content.chunks || []).join('\n\n');
+    const sourceText = await loadRawText(content);
     if (!sourceText.trim()) {
       return res.status(422).json({ error: 'Content has no text to extract from' });
     }

@@ -1,14 +1,55 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { getLibrary, getDueVocab, type ContentItem, type VocabItem } from '@/lib/api';
+import {
+  getLibrary,
+  getDueVocab,
+  getContentStatus,
+  type ContentItem,
+  type IngestStatus,
+  type VocabItem,
+} from '@/lib/api';
+
+const POLL_MS = 2000;
+const IN_FLIGHT: IngestStatus[] = ['queued', 'processing'];
+
+const STATUS_LABEL: Record<IngestStatus, string> = {
+  queued: 'Queued…',
+  processing: 'Processing: scrape → chunk → embed…',
+  ready: 'Ready',
+  failed: 'Failed',
+};
 
 export default function DashboardPage() {
   const [library, setLibrary] = useState<ContentItem[]>([]);
   const [due, setDue] = useState<VocabItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Poll status of in-flight ingestions and merge into the library cards.
+  const pollInFlight = useCallback(async (items: ContentItem[]) => {
+    const pending = items.filter((c) => IN_FLIGHT.includes(c.status ?? 'ready'));
+    if (pending.length === 0) return;
+    const results = await Promise.allSettled(pending.map((c) => getContentStatus(c._id)));
+    setLibrary((prev) =>
+      prev.map((c) => {
+        const i = pending.findIndex((p) => p._id === c._id);
+        const r = i >= 0 ? results[i] : undefined;
+        if (r && r.status === 'fulfilled') {
+          return { ...c, status: r.value.status, error: r.value.error, title: r.value.title };
+        }
+        return c;
+      })
+    );
+  }, []);
+
+  const anyInFlight = library.some((c) => IN_FLIGHT.includes(c.status ?? 'ready'));
+  useEffect(() => {
+    if (!anyInFlight) return;
+    const t = setInterval(() => void pollInFlight(library), POLL_MS);
+    return () => clearInterval(t);
+  }, [anyInFlight, library, pollInFlight]);
 
   useEffect(() => {
     (async () => {
@@ -98,10 +139,12 @@ export default function DashboardPage() {
           </p>
         ) : (
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {library.map((c) => (
+            {library.map((c) => {
+              const st: IngestStatus = c.status ?? 'ready';
+              return (
               <Link
                 key={c._id}
-                href={`/content/${c._id}`}
+                href={st === 'ready' ? `/content/${c._id}` : '/dashboard'}
                 className="rounded border border-slate-200 bg-white p-4 transition hover:border-slate-400"
               >
                 <div className="text-xs uppercase tracking-wide text-slate-400">
@@ -111,8 +154,24 @@ export default function DashboardPage() {
                 <div className="mt-2 text-xs text-slate-500">
                   {new Date(c.created_at).toLocaleDateString()}
                 </div>
+                {st !== 'ready' && (
+                  <div
+                    className={`mt-2 text-xs ${st === 'failed' ? 'text-red-600' : 'text-amber-600'}`}
+                  >
+                    {STATUS_LABEL[st]}
+                    {st === 'failed' && c.error ? ` — ${c.error}` : ''}
+                    {IN_FLIGHT.includes(st) && (
+                      <div className="mt-1 h-1 overflow-hidden rounded bg-slate-100">
+                        <div
+                          className={`h-full bg-amber-400 ${st === 'queued' ? 'w-1/4' : 'w-2/3'} animate-pulse`}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </Link>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>

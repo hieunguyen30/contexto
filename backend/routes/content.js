@@ -1,9 +1,8 @@
 const express = require('express');
 const { Types } = require('mongoose');
 const { Content } = require('../models');
-const { chunkText } = require('../utils/chunker');
-const { extractArticle, extractYoutube } = require('../utils/extractors');
-const { embedChunks } = require('../services/embeddings');
+const { publishIngest } = require('../services/queue');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -34,37 +33,51 @@ router.post('/ingest', async (req, res, next) => {
         .json({ error: `source_type must be one of: ${[...SUPPORTED_SOURCES].join(', ')}` });
     }
 
-    const { title, text } =
-      source_type === 'youtube'
-        ? await extractYoutube(url)
-        : await extractArticle(url);
-
-    if (!text || text.trim().length < 20) {
-      return res.status(422).json({ error: 'Could not extract usable text from source' });
-    }
-
-    const chunks = chunkText(text, 500, 50);
-    if (chunks.length === 0) {
-      return res.status(422).json({ error: 'Text could not be chunked' });
-    }
-
-    const embeddings = await embedChunks(chunks);
-
+    // Placeholder title until the worker scrapes the real one.
     const doc = await Content.create({
       user_id: userId,
-      title,
+      title: url,
       source_url: url,
       source_type,
-      raw_text: text,
-      chunks,
-      embeddings,
       language: target_language,
+      status: 'queued',
     });
 
-    return res.status(201).json({
-      content_id: doc._id,
-      chunk_count: chunks.length,
-      preview: chunks[0].slice(0, 280),
+    try {
+      await publishIngest({ content_id: String(doc._id), url, source_type });
+    } catch (err) {
+      await Content.updateOne({ _id: doc._id }, { $set: { status: 'failed', error: 'Could not enqueue ingestion' } });
+      logger.error('Publish failed', { err, content_id: String(doc._id) });
+      return res.status(503).json({ error: 'Could not enqueue ingestion; try again' });
+    }
+
+    return res.status(202).json({ content_id: doc._id, status: 'queued' });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+router.get('/:id/status', async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: 'Missing or invalid x-user-id header' });
+    }
+    const { id } = req.params;
+    if (!Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
+    const item = await Content.findOne(
+      { _id: id, user_id: userId },
+      { status: 1, error: 1, chunk_count: 1, title: 1 }
+    ).lean();
+    if (!item) return res.status(404).json({ error: 'Content not found' });
+    return res.json({
+      content_id: item._id,
+      status: item.status || 'ready',
+      error: item.error || null,
+      chunk_count: item.chunk_count || 0,
+      title: item.title,
     });
   } catch (err) {
     return next(err);

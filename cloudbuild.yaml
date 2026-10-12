@@ -9,6 +9,10 @@ substitutions:
   _BACKEND_SA: contexto-backend
   _FRONTEND_SA: contexto-frontend
   _WORKER_SA: contexto-worker
+  # Firebase web config (public identifiers, not secrets); from Firebase console -> Project settings.
+  _FIREBASE_API_KEY: ''
+  _FIREBASE_AUTH_DOMAIN: ''
+  _FIREBASE_APP_ID: ''
   _RAW_TEXT_BUCKET: ''   # e.g. <project-id>-contexto-raw-text
 
 options:
@@ -26,6 +30,14 @@ steps:
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/frontend:$SHORT_SHA
       - --build-arg
       - NEXT_PUBLIC_API_URL=https://contexto-backend-${_PROJECT_NUMBER}.${_REGION}.run.app
+      - --build-arg
+      - NEXT_PUBLIC_FIREBASE_API_KEY=${_FIREBASE_API_KEY}
+      - --build-arg
+      - NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=${_FIREBASE_AUTH_DOMAIN}
+      - --build-arg
+      - NEXT_PUBLIC_FIREBASE_PROJECT_ID=$PROJECT_ID
+      - --build-arg
+      - NEXT_PUBLIC_FIREBASE_APP_ID=${_FIREBASE_APP_ID}
       - frontend
     waitFor: ['-']
   - id: build-worker
@@ -55,7 +67,7 @@ steps:
       - --region=${_REGION}
       - --service-account=${_BACKEND_SA}@$PROJECT_ID.iam.gserviceaccount.com
       - --allow-unauthenticated
-      - --update-env-vars=CORS_ORIGIN=https://contexto-frontend-${_PROJECT_NUMBER}.${_REGION}.run.app,PUBSUB_TOPIC=ingest-requests,RAW_TEXT_BUCKET=${_RAW_TEXT_BUCKET}
+      - --update-env-vars=CORS_ORIGIN=https://contexto-frontend-${_PROJECT_NUMBER}.${_REGION}.run.app,PUBSUB_TOPIC=ingest-requests,AUTH_MODE=firebase,FIREBASE_PROJECT_ID=$PROJECT_ID,RAW_TEXT_BUCKET=${_RAW_TEXT_BUCKET}
       - --update-secrets=MONGODB_URI=MONGODB_URI:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest,ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest
     waitFor: ['push-backend']
   - id: deploy-worker

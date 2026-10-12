@@ -4,15 +4,13 @@ const { Content } = require('../models');
 const { publishIngest } = require('../services/queue');
 const logger = require('../utils/logger');
 
+const { requireAuth, getUserId } = require('../middleware/auth');
+
 const router = express.Router();
+router.use(requireAuth);
 
 const SUPPORTED_SOURCES = new Set(['youtube', 'article']);
 
-function getUserId(req) {
-  const raw = req.header('x-user-id');
-  if (!raw || !Types.ObjectId.isValid(raw)) return null;
-  return new Types.ObjectId(raw);
-}
 
 router.post('/ingest', async (req, res, next) => {
   try {

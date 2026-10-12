@@ -5,15 +5,13 @@ const { claudeJson } = require('../services/claude');
 const { loadRawText } = require('../services/storage');
 const { updateSM2 } = require('../utils/sm2');
 
+const { requireAuth, getUserId } = require('../middleware/auth');
+
 const router = express.Router();
+router.use(requireAuth);
 
 const VALID_DIFFICULTY = new Set(['beginner', 'intermediate', 'advanced']);
 
-function getUserId(req) {
-  const raw = req.header('x-user-id');
-  if (!raw || !Types.ObjectId.isValid(raw)) return null;
-  return new Types.ObjectId(raw);
-}
 
 function startOfToday() {
   const d = new Date();

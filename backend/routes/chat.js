@@ -1,19 +1,16 @@
 const express = require('express');
 const { Types } = require('mongoose');
-const { Content } = require('../models');
 const { embedText } = require('../services/embeddings');
 const { claudeText } = require('../services/claude');
-const { topKByCosine } = require('../utils/similarity');
+const { getRetriever } = require('../utils/retrieval');
+
+const { requireAuth, getUserId } = require('../middleware/auth');
 
 const router = express.Router();
+router.use(requireAuth);
 
 const TOP_K = 3;
 
-function getUserId(req) {
-  const raw = req.header('x-user-id');
-  if (!raw || !Types.ObjectId.isValid(raw)) return null;
-  return new Types.ObjectId(raw);
-}
 
 router.post('/', async (req, res, next) => {
   try {
@@ -33,26 +30,13 @@ router.post('/', async (req, res, next) => {
       return res.status(400).json({ error: 'target_language is required' });
     }
 
-    const content = await Content.findOne(
-      { _id: content_id, user_id: userId },
-      { chunks: 1, embeddings: 1 }
-    ).lean();
-    if (!content) return res.status(404).json({ error: 'Content not found' });
-
-    const embeddings = content.embeddings || [];
-    const chunks = content.chunks || [];
-    if (embeddings.length === 0 || chunks.length === 0) {
-      return res.status(422).json({ error: 'Content has no indexed chunks' });
-    }
-
     const queryVec = await embedText(message);
-    const top = topKByCosine(queryVec, embeddings, TOP_K);
+    const top = await getRetriever().search({ userId, contentId: content_id, queryVec, k: TOP_K });
+    if (top === null) return res.status(404).json({ error: 'Content not found' });
+    if (top.length === 0) return res.status(422).json({ error: 'Content has no indexed chunks' });
 
     const contextBlock = top
-      .map(({ index, score }, i) => {
-        const chunk = chunks[index] || '';
-        return `[Context ${i + 1} | similarity=${score.toFixed(3)}]\n${chunk}`;
-      })
+      .map(({ text, score }, i) => `[Context ${i + 1} | similarity=${score.toFixed(3)}]\n${text}`)
       .join('\n\n');
 
     const system = `You are a language tutor. Answer in ${target_language}. Use only the provided context.`;

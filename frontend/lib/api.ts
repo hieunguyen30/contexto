@@ -1,13 +1,17 @@
 import axios from 'axios';
-import { getUserId } from './userId';
+import { getFirebaseAuth, firebaseConfigured } from './firebase';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 export const api = axios.create({ baseURL: API_URL });
 
-api.interceptors.request.use((config) => {
-  const id = getUserId();
-  if (id) config.headers['x-user-id'] = id;
+// Attach the Firebase ID token (refreshed automatically by the SDK when it nears expiry).
+api.interceptors.request.use(async (config) => {
+  if (!firebaseConfigured) return config;
+  const auth = getFirebaseAuth();
+  await auth.authStateReady();
+  const token = await auth.currentUser?.getIdToken();
+  if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 

@@ -6,7 +6,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "test": "node __tests__/manual.test.js && node __tests__/routes.test.js && node __tests__/worker.test.js && node __tests__/retrieval.test.js && node __tests__/auth.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
@@ -17,6 +18,8 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
+    "firebase-admin": "^14.5.0",
+    "google-auth-library": "^11.2.0",
     "mongodb": "^6.10.0",
     "mongoose": "^8.8.0",
     "openai": "^4.73.0",

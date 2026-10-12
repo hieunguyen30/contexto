@@ -128,9 +128,11 @@ module "backend" {
   timeout_seconds       = 120
   deletion_protection   = var.deletion_protection
   env = {
-    CORS_ORIGIN     = local.frontend_url
-    PUBSUB_TOPIC    = "ingest-requests"
-    RAW_TEXT_BUCKET = module.storage.bucket_name
+    CORS_ORIGIN         = local.frontend_url
+    PUBSUB_TOPIC        = "ingest-requests"
+    AUTH_MODE           = "firebase"
+    FIREBASE_PROJECT_ID = var.project_id
+    RAW_TEXT_BUCKET     = module.storage.bucket_name
   }
   secret_env = module.secrets.secret_ids
   depends_on = [module.secrets]

@@ -4,6 +4,7 @@ const { extractArticle, extractYoutube } = require('../utils/extractors');
 const embeddingsService = require('./embeddings');
 const storage = require('./storage');
 const logger = require('../utils/logger');
+const { getRetriever } = require('../utils/retrieval');
 
 // Errors that retrying cannot fix: the worker acks the message instead of triggering redelivery.
 class PermanentIngestError extends Error {}
@@ -53,12 +54,14 @@ async function processIngest({ content_id, url, source_type }, deps = defaultDep
     if (chunks.length === 0) throw new PermanentIngestError('Text could not be chunked');
 
     const embeddings = await deps.embedChunks(chunks);
+    const retriever = deps.retriever || getRetriever();
+    const { storeInMongo } = await retriever.index({ userId: content.user_id, contentId: content_id, embeddings });
     const stored = await deps.saveRawText(content_id, text);
 
     await deps.Content.updateOne(
       { _id: content_id },
       {
-        $set: { title: title || url, chunks, embeddings, chunk_count: chunks.length, status: 'ready', error: null, ...stored },
+        $set: { title: title || url, chunks, embeddings: storeInMongo ? embeddings : [], chunk_count: chunks.length, status: 'ready', error: null, ...stored },
       }
     );
     logger.info('ingest_complete', {

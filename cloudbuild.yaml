@@ -1,0 +1,66 @@
+# Build -> push to Artifact Registry -> deploy both services to Cloud Run.
+# Run scripts/gcp-setup.sh once first (APIs, repo, service accounts, secrets).
+substitutions:
+  _REGION: us-central1
+  _REPO: contexto
+  # Used to derive the deterministic Cloud Run URLs (https://<svc>-<project-number>.<region>.run.app)
+  # so the frontend can be built with the API URL and the backend can allow the frontend origin.
+  _PROJECT_NUMBER: ''
+  _BACKEND_SA: contexto-backend
+  _FRONTEND_SA: contexto-frontend
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  - id: build-backend
+    name: gcr.io/cloud-builders/docker
+    args: ['build', '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/backend:$SHORT_SHA', 'backend']
+  - id: build-frontend
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/frontend:$SHORT_SHA
+      - --build-arg
+      - NEXT_PUBLIC_API_URL=https://contexto-backend-${_PROJECT_NUMBER}.${_REGION}.run.app
+      - frontend
+    waitFor: ['-']
+  - id: push-backend
+    name: gcr.io/cloud-builders/docker
+    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/backend:$SHORT_SHA']
+    waitFor: ['build-backend']
+  - id: push-frontend
+    name: gcr.io/cloud-builders/docker
+    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/frontend:$SHORT_SHA']
+    waitFor: ['build-frontend']
+  - id: deploy-backend
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - contexto-backend
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/backend:$SHORT_SHA
+      - --region=${_REGION}
+      - --service-account=${_BACKEND_SA}@$PROJECT_ID.iam.gserviceaccount.com
+      - --allow-unauthenticated
+      - --set-env-vars=CORS_ORIGIN=https://contexto-frontend-${_PROJECT_NUMBER}.${_REGION}.run.app
+      - --set-secrets=MONGODB_URI=MONGODB_URI:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest,ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest
+    waitFor: ['push-backend']
+  - id: deploy-frontend
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - contexto-frontend
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/frontend:$SHORT_SHA
+      - --region=${_REGION}
+      - --service-account=${_FRONTEND_SA}@$PROJECT_ID.iam.gserviceaccount.com
+      - --allow-unauthenticated
+    waitFor: ['push-frontend']
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/backend:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/frontend:$SHORT_SHA

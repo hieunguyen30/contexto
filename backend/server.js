@@ -33,11 +33,26 @@ app.use((err, req, res, _next) => {
 
 const PORT = process.env.PORT || 4000;
 
+// Local dev only (no Pub/Sub): ingestion runs inside this process, so a restart orphans in-flight jobs.
+// Re-queue them on boot. With Pub/Sub, redelivery handles this instead.
+async function resumeLocalIngests() {
+  if (process.env.PUBSUB_TOPIC) return;
+  const { Content } = require('./models');
+  const { publishIngest } = require('./services/queue');
+  await Content.updateMany({ status: 'processing' }, { $set: { status: 'queued' } });
+  const orphans = await Content.find({ status: 'queued' }, { source_url: 1, source_type: 1 }).lean();
+  for (const c of orphans) {
+    await publishIngest({ content_id: String(c._id), url: c.source_url, source_type: c.source_type });
+  }
+  if (orphans.length) logger.info('Resumed local ingests', { count: orphans.length });
+}
+
 connectDB()
   .then(() => {
     app.listen(PORT, '0.0.0.0', () => {
       logger.info('Contexto backend listening', { port: Number(PORT) });
     });
+    resumeLocalIngests().catch((err) => logger.error('Resume of local ingests failed', { err }));
   })
   .catch((err) => {
     logger.error('Failed to connect to MongoDB', { err });

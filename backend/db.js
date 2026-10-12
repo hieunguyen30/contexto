@@ -1,5 +1,12 @@
 const mongoose = require('mongoose');
+const dns = require('dns');
 const logger = require('./utils/logger');
+
+// mongodb+srv:// needs SRV lookups, which some local resolvers (VPN/Tailscale/WSL stubs) refuse.
+// DNS_SERVERS=8.8.8.8,1.1.1.1 makes Node use those instead of the system resolver.
+if (process.env.DNS_SERVERS) {
+  dns.setServers(process.env.DNS_SERVERS.split(',').map((s) => s.trim()).filter(Boolean));
+}
 
 async function connectDB() {
   const uri = process.env.MONGODB_URI;

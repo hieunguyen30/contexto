@@ -47,8 +47,8 @@ Progress bar across the top tracks your position in the card.
 ### Frontend
 
 - **Five Tailwind pages** — Dashboard, Upload, Content, Quiz, Chat. No component library.
-- **Paste-in user_id editor** in the top nav (auth shim until real sessions ship).
-- **Typed API client** in [`frontend/lib/api.ts`](frontend/lib/api.ts) — axios attaches `x-user-id` automatically.
+- **Google sign-in** (Firebase Auth); the backend verifies the ID token on every request.
+- **Typed API client** in [`frontend/lib/api.ts`](frontend/lib/api.ts) — axios attaches the Firebase ID token automatically.
 - **Clean async UX** — loading states, scoped errors, transitions where they matter.
 
 ### Developer experience
@@ -120,30 +120,23 @@ npm run dev
 
 Open <http://localhost:3000>.
 
-### 3. Create a user (one-time, dev)
+### 3. Sign in
 
-There's no auth yet — the backend reads `x-user-id` from a request header, and the frontend stores it in `localStorage`. Create a user document in Mongo:
+The frontend needs a Firebase web app (Firebase console → add a web app, enable **Google** under Authentication → Sign-in method) and the four `NEXT_PUBLIC_FIREBASE_*` values in `frontend/.env.local`. Set `FIREBASE_PROJECT_ID` and `AUTH_MODE=firebase` in `backend/.env`. The first sign-in creates your `User` document automatically (defaults: Spanish learner, English native — editable in Mongo).
 
-```js
-db.users.insertOne({
-  email: "you@example.com",
-  target_language: "Spanish",
-  native_language: "English",
-  created_at: new Date()
-});
-```
-
-Copy the returned `_id`, then in the app click the user chip in the top-right of the nav and paste it in. Every subsequent request will send `x-user-id: <that id>`.
+For API-only local work without Firebase, leave `AUTH_MODE=dev`: the backend then accepts an `x-user-id: <ObjectId>` header (e.g. with curl or k6). Dev mode refuses to start when `NODE_ENV=production`.
 
 ## API
 
-All endpoints require `x-user-id: <ObjectId>` unless noted.
+All endpoints require `Authorization: Bearer <Firebase ID token>` unless noted (or `x-user-id` when `AUTH_MODE=dev`).
 
 | Method | Path | Body / Query | Returns |
 |---|---|---|---|
 | GET | `/health` | — (no auth) | `{ status, service }` |
-| POST | `/api/content/ingest` | `{ url, source_type: "youtube"\|"article", target_language }` | `{ content_id, chunk_count, preview }` |
-| GET | `/api/content/library` | — | `{ items: Content[] }` |
+| POST | `/api/content/ingest` | `{ url, source_type: "youtube"\|"article", target_language }` | **202** `{ content_id, status: "queued" }` — processing is async |
+| GET | `/api/content/:id/status` | — | `{ content_id, status: "queued"\|"processing"\|"ready"\|"failed", error, chunk_count, title }` |
+| GET | `/api/vocab/:id/pronunciation` | — | `audio/mpeg` (Cloud Text-to-Speech) |
+| GET | `/api/content/library` | — | `{ items: Content[] }` (each with `status`) |
 | GET | `/api/content/:id` | — | `Content` (no embeddings/chunks/raw_text) |
 | POST | `/api/vocab/extract` | `{ content_id, difficulty_level: "beginner"\|"intermediate"\|"advanced" }` | `{ vocab: VocabItem[] }` (10 items) |
 | GET | `/api/vocab` | `?content_id=<id>` (optional) | `{ items: VocabItem[] }` |
@@ -154,7 +147,7 @@ All endpoints require `x-user-id: <ObjectId>` unless noted.
 
 ## How the pieces work
 
-**Ingestion.** `POST /api/content/ingest` pulls a transcript (YouTube via `youtube-transcript`) or scrapes article text (axios + cheerio). The text is split into ~500-token chunks with ~50-token overlap, but the chunker only slides on **whole sentence boundaries** — both Latin punctuation (`.!?…`) and CJK (`。！？`). Each chunk is embedded with `text-embedding-3-small` and persisted alongside the text.
+**Ingestion.** `POST /api/content/ingest` only creates a `Content` doc (`status="queued"`) and publishes a message; the worker (see [Architecture](#architecture)) does the following. It pulls a transcript (YouTube via `youtube-transcript`) or scrapes article text (axios + cheerio). The text is split into ~500-token chunks with ~50-token overlap, but the chunker only slides on **whole sentence boundaries** — both Latin punctuation (`.!?…`) and CJK (`。！？`). Each chunk is embedded with `text-embedding-3-small` and persisted alongside the text.
 
 **Vocab extraction.** `POST /api/vocab/extract` sends the raw text (capped at 60k chars) to Claude, asks for 10 useful words for the requested difficulty level, and saves each as a `VocabItem` with SM-2 defaults (`ease_factor=2.5`, `interval=1`, `repetitions=0`, `next_review_date=today`).
 
@@ -168,13 +161,115 @@ All endpoints require `x-user-id: <ObjectId>` unless noted.
 
 ## Tests
 
-A pair of smoke tests live in `backend/__tests__`:
-
 ```bash
 cd backend
+npm test                        # everything below
 node __tests__/manual.test.js   # chunker, sm2, similarity
 node __tests__/routes.test.js   # routing order, validation, CORS
+node __tests__/worker.test.js   # worker idempotency, redelivery, Pub/Sub push handling
+node __tests__/retrieval.test.js        # top-k, Vertex request shape
+node __tests__/retrieval-cache.test.js  # cache hits, ownership, LRU eviction
+node __tests__/auth.test.js     # Firebase token verification, uid → user mapping
+node __tests__/ops.test.js      # reviews-due job, LLM cost accounting
 ```
 
-These don't need DB or API keys — they exercise pure utilities and the express layer with a stubbed app.
+None of these need a database, API keys or GCP — they use fakes and stubbed apps.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  U[Browser] -->|Google sign-in| FA[Firebase Auth]
+  U --> FE[Cloud Run: frontend<br/>Next.js standalone]
+  U -->|Bearer ID token| BE[Cloud Run: backend<br/>Express API]
+  BE -->|verify token| FA
+  BE -->|publish ingest-requests| PS[(Pub/Sub topic)]
+  PS -->|push + OIDC, backoff retry| WK[Cloud Run: worker<br/>scrape → chunk → embed]
+  PS -. 5 failed attempts .-> DLQ[(ingest-dlq)]
+  WK --> GCS[(Cloud Storage<br/>raw text)]
+  WK --> MDB[(MongoDB Atlas)]
+  BE --> MDB
+  BE -->|retrieval| RET{{utils/retrieval.js}}
+  RET --> MEM[in-process cache]
+  RET -.-> VX[Vertex AI Vector Search]
+  BE & WK --> LLM[OpenAI embeddings<br/>Anthropic Claude]
+  SCH[Cloud Scheduler] --> JOB[Cloud Run job:<br/>reviews-due email]
+  JOB --> MDB
+  BE & WK -->|JSON logs| CL[Cloud Logging]
+  CL --> MON[Monitoring: dashboard, SLO, alerts]
+  CL -->|sink| BQ[(BigQuery)]
+```
+
+Secrets (`MONGODB_URI`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `SMTP_URL`) live in Secret Manager and reach Cloud Run as env vars; each service has its own service account that can read only the secrets it needs.
+
+### Ingestion state machine
+
+`queued → processing → ready` or `failed`. The worker claims a document with one atomic `findOneAndUpdate`, so duplicate or concurrent Pub/Sub deliveries do the work once; `ready` is never reprocessed, and a `processing` claim older than 10 minutes (crashed worker) can be re-claimed. Transient errors return HTTP 500 so Pub/Sub retries with exponential backoff (10 s → 10 min) and dead-letters after 5 attempts to `ingest-dlq`; permanent errors (no extractable text, malformed message) are acked after the doc is marked `failed`.
+
+## Deploy
+
+Prerequisites: a GCP project with billing, `gcloud`, `terraform ≥ 1.6`, a MongoDB Atlas URI, and a Firebase web app with Google sign-in enabled.
+
+```bash
+# 1. Terraform state bucket + infrastructure (APIs, Artifact Registry, service accounts, secrets,
+#    bucket, Pub/Sub + DLQ, Cloud Run services/job, scheduler, monitoring, BigQuery log export)
+PROJECT_ID=my-dev BUCKET=my-dev-tfstate ./scripts/tf-bootstrap.sh
+cd infra/envs/dev          # edit dev.tfvars (project_id, alert_email) and backend.hcl (bucket)
+terraform init -backend-config=backend.hcl
+terraform apply -var-file=dev.tfvars
+
+# 2. Secret values (Terraform creates the containers, never the values)
+printf '%s' "$MONGODB_URI"       | gcloud secrets versions add MONGODB_URI --data-file=-
+printf '%s' "$OPENAI_API_KEY"    | gcloud secrets versions add OPENAI_API_KEY --data-file=-
+printf '%s' "$ANTHROPIC_API_KEY" | gcloud secrets versions add ANTHROPIC_API_KEY --data-file=-
+printf '%s' "$SMTP_URL"          | gcloud secrets versions add SMTP_URL --data-file=-   # smtps://user:pass@host
+
+# 3. Build and deploy the images (the services start as a placeholder image until this runs)
+gcloud builds submit --config cloudbuild.yaml --substitutions=\
+_PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)'),\
+_RAW_TEXT_BUCKET=$PROJECT_ID-contexto-raw-text,SHORT_SHA=$(git rev-parse --short HEAD),\
+_FIREBASE_API_KEY=...,_FIREBASE_AUTH_DOMAIN=...,_FIREBASE_APP_ID=...
+```
+
+Add the frontend's Cloud Run hostname to Firebase Auth → Settings → Authorized domains. Pull requests run `terraform plan` for both environments and merges to `main` apply (prod behind a required-reviewer environment) via [`.github/workflows/terraform.yml`](.github/workflows/terraform.yml).
+
+`scripts/gcp-setup.sh` + `scripts/gcp-pubsub.sh` are the manual (non-Terraform) equivalent of step 1 for the core pipeline, kept for reference.
+
+## Operations
+
+- **SLO**: 95 % of ingestions reach `ready` within 30 s of being enqueued (28-day rolling window), measured from the worker's `ingest_complete` log via the `ingest_e2e_ms` log-based metric. A burn-rate alert fires at 10× budget consumption over 1 h.
+- **Alerts**: SLO burn, dead-letter queue not empty, oldest unacked ingest message > 5 min, API 5xx rate.
+- **Dashboard** "Contexto operations": API latency p50/p95/p99, API error rate, ingest queue depth, DLQ count, ingestion time, failed attempts.
+- **Cost logging**: every request logs `tokens_in`, `tokens_out`, `cost_usd` (estimate from [`utils/requestContext.js`](backend/utils/requestContext.js), override prices with `LLM_PRICING_JSON`) plus per-call `llm_usage` lines. Logs are exported to BigQuery; ready-made queries (cost per endpoint/day, hardest words, retention by difficulty, SLO attainment) are in [`docs/analytics.sql`](docs/analytics.sql).
+- **Daily email**: Cloud Scheduler (08:00 UTC) runs the `contexto-reviews-due` Cloud Run job, which emails users who have words due. Without `SMTP_URL` it logs a dry run.
+- **Load tests**: [`loadtest/`](loadtest) (k6) — results and the bottleneck found in [`docs/benchmarks.md`](docs/benchmarks.md).
+
+## Design trade-offs
+
+**Why Pub/Sub for ingestion.** Scraping + embedding takes seconds to minutes and fails in ways the user cannot fix mid-request (site down, OpenAI 429). A queue gives the API a constant-time 202, absorbs bursts (the worker scales on queue pressure, the API is unaffected), and turns failure handling into configuration: backoff retries, a dead-letter topic you can inspect and replay, and at-least-once delivery that the idempotent worker makes safe. The alternatives were worse here: Cloud Tasks gives per-task rate limiting but we have no need to throttle a downstream, and a Mongo-polled job table would mean writing our own retry/backoff/DLQ.
+
+**Why Cloud Run, not GKE.** Three small stateless HTTP services with spiky, low traffic. Cloud Run scales to zero, needs no node pools, upgrades or cluster RBAC, and gives per-request IAM (the worker accepts only the Pub/Sub push identity). GKE would add a cluster to operate and, for Standard, an always-on baseline, in exchange for capabilities we don't use (custom schedulers, sidecars, daemonsets, GPUs, very high steady throughput where per-node pricing wins). Revisit if sustained load makes always-on nodes cheaper than per-request billing, or if we need long-lived connections/WebSockets at scale.
+
+**Retrieval.** The in-process backend is the right default for small corpora: zero extra infrastructure and ~4 ms warm. Its limits are real, though — about 800 chunks per content (Mongo's 16 MB document cap) and per-instance memory — see [`docs/benchmarks.md`](docs/benchmarks.md). Vertex AI Vector Search removes both limits but has a fixed always-on cost that dwarfs this app's current needs; it is implemented behind `RETRIEVAL_BACKEND=vertex` but **has not been benchmarked or run against a real index**. If vectors need to scale before then, Atlas Vector Search (already in the stack's database) is the cheaper step to evaluate first.
+
+**Cost per month (estimates, not measurements — check the GCP pricing calculator).**
+
+| Item | Dev / low traffic | Prod |
+|---|---|---|
+| Cloud Run (3 services, scale-to-zero) | within free tier | backend `min_instances=1` ≈ a few $ for the always-on instance, plus per-request |
+| Pub/Sub, Cloud Storage, Secret Manager, Scheduler | ≈ $0–1 | ≈ $1–5 |
+| Cloud Logging + BigQuery export | free tier / pennies | grows with traffic; partitions expire after 90 days |
+| MongoDB Atlas | M0 free | M10-class ≈ tens of $ |
+| Vertex Vector Search (optional) | not deployed | always-on node, tens of $ |
+| OpenAI + Anthropic | **dominant cost** — see `cost_usd` logs; ≈ $0.003 per chat at 800 in / 60 out tokens with the default Sonnet price table | same |
+
+## Not verified yet
+
+Everything below was implemented and unit-tested but **never run against real Google Cloud** (no project was available): the Cloud Build pipeline, Terraform `apply` (modules pass `terraform validate` only), Pub/Sub push + dead-lettering, Firebase sign-in end to end, Vertex AI Vector Search and Vertex embeddings, Cloud Text-to-Speech, the email job, the monitoring dashboard/SLO/alerts and the BigQuery sink. The Docker images build and run locally, and the load tests ran against a local stack with mocked LLMs.
+
+## Optional extras
+
+- **Pronunciation**: `GET /api/vocab/:id/pronunciation` (Cloud Text-to-Speech MP3, "Listen" button on the quiz page).
+- **Quiz analytics**: quiz attempts are stored in `QuizAttempt` and logged as `quiz_attempt`; SQL for hardest words and retention by difficulty is in [`docs/analytics.sql`](docs/analytics.sql).
+- **Vertex embeddings**: `EMBED_PROVIDER=vertex` (`text-embedding-005`, 768-d). Quality and cost have **not** been compared with OpenAI; switching providers requires re-ingesting content because vectors are not interchangeable.
 

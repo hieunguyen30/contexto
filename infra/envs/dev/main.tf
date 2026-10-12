@@ -28,6 +28,10 @@ variable "worker_max_instances" {
   type    = number
   default = 5
 }
+variable "alert_email" {
+  type    = string
+  default = ""
+}
 variable "force_destroy_bucket" {
   type    = bool
   default = false
@@ -45,6 +49,7 @@ module "stack" {
   backend_max_instances = var.backend_max_instances
   worker_max_instances  = var.worker_max_instances
   force_destroy_bucket  = var.force_destroy_bucket
+  alert_email           = var.alert_email
   deletion_protection   = var.deletion_protection
 }
 

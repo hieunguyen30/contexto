@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { generateQuiz, submitReview, type QuizData } from '@/lib/api';
+import { generateQuiz, getPronunciation, submitReview, type QuizData } from '@/lib/api';
 
 type Stage = 'fill' | 'mc' | 'translate' | 'rate' | 'done';
 
@@ -20,6 +20,7 @@ function normalize(s: string) {
 
 export default function QuizPage() {
   const { vocab_item_id } = useParams<{ vocab_item_id: string }>();
+  const startedAt = useRef(Date.now());
   const [word, setWord] = useState('');
   const [quiz, setQuiz] = useState<QuizData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -41,6 +42,7 @@ export default function QuizPage() {
       try {
         const res = await generateQuiz(vocab_item_id);
         setQuiz(res.quiz);
+        startedAt.current = Date.now(); // response time excludes quiz generation
         setWord(res.word);
       } catch (e: unknown) {
         const err = e as { response?: { data?: { error?: string } }; message?: string };
@@ -51,11 +53,23 @@ export default function QuizPage() {
     })();
   }, [vocab_item_id]);
 
+  const speak = async () => {
+    if (!vocab_item_id) return;
+    try {
+      const url = URL.createObjectURL(await getPronunciation(vocab_item_id));
+      const audio = new Audio(url);
+      audio.onended = () => URL.revokeObjectURL(url);
+      await audio.play();
+    } catch {
+      setError('Pronunciation is not available for this word.');
+    }
+  };
+
   const rate = async (quality: number) => {
     if (!vocab_item_id) return;
     setSubmitting(true);
     try {
-      const res = await submitReview(vocab_item_id, quality);
+      const res = await submitReview(vocab_item_id, quality, Date.now() - startedAt.current);
       setNextReview(res.next_review_date);
       setStage('done');
     } catch (e: unknown) {
@@ -79,7 +93,17 @@ export default function QuizPage() {
   return (
     <main className="mx-auto max-w-2xl px-6 py-8">
       <div className="text-xs uppercase tracking-wide text-slate-400">Quiz</div>
-      <h1 className="mt-1 text-2xl font-semibold tracking-tight">{word}</h1>
+      <h1 className="mt-1 flex items-center gap-2 text-2xl font-semibold tracking-tight">
+        {word}
+        <button
+          type="button"
+          onClick={() => void speak()}
+          aria-label="Play pronunciation"
+          className="rounded border border-slate-300 px-2 py-0.5 text-xs font-normal hover:border-slate-500"
+        >
+          ▶ Listen
+        </button>
+      </h1>
 
       <div className="mt-2 flex gap-1.5">
         {(['fill', 'mc', 'translate', 'rate'] as const).map((s, i) => (

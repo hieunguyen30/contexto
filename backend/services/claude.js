@@ -1,4 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
+const logger = require('../utils/logger');
+const { recordUsage } = require('../utils/requestContext');
 
 const MODEL = 'claude-sonnet-4-20250514';
 
@@ -11,6 +13,16 @@ function getClient() {
     client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   }
   return client;
+}
+
+function logUsage(message) {
+  const u = message.usage || {};
+  logger.info('llm_usage', recordUsage({
+    kind: 'completion',
+    model: MODEL,
+    inputTokens: u.input_tokens || 0,
+    outputTokens: u.output_tokens || 0,
+  }));
 }
 
 function extractText(message) {
@@ -42,6 +54,7 @@ async function claudeJson({ system, user, maxTokens = 2048 }) {
     system,
     messages: [{ role: 'user', content: user }],
   });
+  logUsage(message);
   const text = extractText(message);
   return parseJson(text);
 }
@@ -54,6 +67,7 @@ async function claudeText({ system, user, maxTokens = 1024 }) {
     system,
     messages: [{ role: 'user', content: user }],
   });
+  logUsage(message);
   return extractText(message);
 }
 

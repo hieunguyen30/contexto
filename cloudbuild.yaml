@@ -70,6 +70,18 @@ steps:
       - --update-env-vars=CORS_ORIGIN=https://contexto-frontend-${_PROJECT_NUMBER}.${_REGION}.run.app,PUBSUB_TOPIC=ingest-requests,AUTH_MODE=firebase,FIREBASE_PROJECT_ID=$PROJECT_ID,RAW_TEXT_BUCKET=${_RAW_TEXT_BUCKET}
       - --update-secrets=MONGODB_URI=MONGODB_URI:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest,ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest
     waitFor: ['push-backend']
+  - id: deploy-reviews-job
+    # Job itself (schedule, secrets, command) is defined in Terraform; this only ships the new image.
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - update
+      - contexto-reviews-due
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/backend:$SHORT_SHA
+      - --region=${_REGION}
+    waitFor: ['push-backend']
   - id: deploy-worker
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud

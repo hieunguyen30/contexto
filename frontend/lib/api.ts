@@ -111,9 +111,16 @@ export async function generateQuiz(
 
 export async function submitReview(
   vocab_item_id: string,
-  quality: number
+  quality: number,
+  response_time_ms?: number
 ): Promise<{ vocab_item: VocabItem; next_review_date: string }> {
-  const { data } = await api.post('/api/vocab/review', { vocab_item_id, quality });
+  const { data } = await api.post('/api/vocab/review', { vocab_item_id, quality, response_time_ms });
+  return data;
+}
+
+// Fetches pronunciation audio (needs the auth header, so it can't be a plain <audio src>).
+export async function getPronunciation(vocab_item_id: string): Promise<Blob> {
+  const { data } = await api.get(`/api/vocab/${vocab_item_id}/pronunciation`, { responseType: 'blob' });
   return data;
 }
 

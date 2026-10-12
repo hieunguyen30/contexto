@@ -4,6 +4,7 @@ const VocabItemSchema = new Schema(
   {
     user_id: { type: Types.ObjectId, ref: 'User', required: true, index: true },
     content_id: { type: Types.ObjectId, ref: 'Content', required: true, index: true },
+    difficulty: { type: String, enum: ['beginner', 'intermediate', 'advanced'] },
     word: { type: String, required: true, trim: true },
     definition: { type: String, required: true },
     example_sentence: { type: String },

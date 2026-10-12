@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const { connectDB } = require('./db');
 const logger = require('./utils/logger');
+const requestLog = require('./middleware/requestLog');
 const contentRouter = require('./routes/content');
 const vocabRouter = require('./routes/vocab');
 const chatRouter = require('./routes/chat');
@@ -13,6 +14,7 @@ const app = express();
 // Restrict to the frontend origin(s) when CORS_ORIGIN is set (comma-separated); open in local dev.
 const corsOrigins = (process.env.CORS_ORIGIN || '').split(',').map((o) => o.trim()).filter(Boolean);
 app.use(cors(corsOrigins.length ? { origin: corsOrigins } : undefined));
+app.use(requestLog);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 

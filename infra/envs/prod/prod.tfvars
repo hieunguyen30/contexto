@@ -5,3 +5,4 @@ backend_max_instances = 20
 worker_max_instances  = 10
 force_destroy_bucket  = false
 deletion_protection   = true
+alert_email           = "" # set to receive alert emails

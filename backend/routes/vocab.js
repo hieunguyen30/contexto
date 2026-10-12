@@ -1,6 +1,8 @@
 const express = require('express');
 const { Types } = require('mongoose');
-const { Content, VocabItem, User } = require('../models');
+const { Content, VocabItem, User, QuizAttempt } = require('../models');
+const logger = require('../utils/logger');
+const { synthesize } = require('../services/tts');
 const { claudeJson } = require('../services/claude');
 const { loadRawText } = require('../services/storage');
 const { updateSM2 } = require('../utils/sm2');
@@ -87,6 +89,7 @@ router.post('/extract', async (req, res, next) => {
       .map((v) => ({
         user_id: userId,
         content_id: content._id,
+        difficulty: difficulty_level,
         word: v.word.trim(),
         definition: String(v.definition || '').trim(),
         example_sentence: String(v.example_sentence || '').trim(),
@@ -211,6 +214,26 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+// Pronunciation audio (Cloud Text-to-Speech) for a vocab word, in the content's language.
+router.get('/:id/pronunciation', async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Missing or invalid x-user-id header' });
+    if (!Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ error: 'Invalid id' });
+
+    const item = await VocabItem.findOne({ _id: req.params.id, user_id: userId }).lean();
+    if (!item) return res.status(404).json({ error: 'Vocab item not found' });
+    const content = await Content.findOne({ _id: item.content_id }, { language: 1 }).lean();
+
+    const audio = await synthesize(item.word, content && content.language);
+    if (!audio) return res.status(422).json({ error: 'Pronunciation is not supported for this language' });
+    res.set({ 'Content-Type': 'audio/mpeg', 'Cache-Control': 'private, max-age=86400' });
+    return res.send(audio);
+  } catch (err) {
+    return next(err);
+  }
+});
+
 router.post('/review', async (req, res, next) => {
   try {
     const userId = getUserId(req);
@@ -218,7 +241,7 @@ router.post('/review', async (req, res, next) => {
       return res.status(401).json({ error: 'Missing or invalid x-user-id header' });
     }
 
-    const { vocab_item_id, quality } = req.body || {};
+    const { vocab_item_id, quality, response_time_ms } = req.body || {};
     if (!vocab_item_id || !Types.ObjectId.isValid(vocab_item_id)) {
       return res.status(400).json({ error: 'Valid vocab_item_id is required' });
     }
@@ -235,6 +258,22 @@ router.post('/review', async (req, res, next) => {
     item.repetitions = update.repetitions;
     item.next_review_date = update.next_review_date;
     await item.save();
+
+    // Quiz history: feeds the QuizAttempt collection and the quiz_attempt log event exported to BigQuery.
+    const correct = quality >= 3;
+    const responseTime = Number.isFinite(response_time_ms) && response_time_ms >= 0 ? Math.round(response_time_ms) : 0;
+    await QuizAttempt.create({ user_id: userId, vocab_item_id: item._id, correct, response_time_ms: responseTime });
+    logger.info('quiz_attempt', {
+      user_id: String(userId),
+      vocab_item_id: String(item._id),
+      word: item.word,
+      difficulty: item.difficulty || null,
+      quality,
+      correct,
+      response_time_ms: responseTime,
+      repetitions: item.repetitions,
+      interval: item.interval,
+    });
 
     return res.json({
       vocab_item: item.toObject(),

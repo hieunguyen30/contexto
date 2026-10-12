@@ -7,12 +7,13 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node __tests__/manual.test.js && node __tests__/routes.test.js && node __tests__/worker.test.js && node __tests__/retrieval.test.js && node __tests__/auth.test.js"
+    "test": "node __tests__/manual.test.js && node __tests__/routes.test.js && node __tests__/worker.test.js && node __tests__/retrieval.test.js && node __tests__/retrieval-cache.test.js && node __tests__/auth.test.js && node __tests__/ops.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
     "@google-cloud/pubsub": "^6.2.0",
     "@google-cloud/storage": "^8.4.0",
+    "@google-cloud/text-to-speech": "^7.1.1",
     "axios": "^1.7.7",
     "cheerio": "^1.0.0",
     "cors": "^2.8.5",
@@ -22,6 +23,7 @@
     "google-auth-library": "^11.2.0",
     "mongodb": "^6.10.0",
     "mongoose": "^8.8.0",
+    "nodemailer": "^10.1.0",
     "openai": "^4.73.0",
     "pdf-parse": "^1.1.1",
     "youtube-transcript": "^1.2.1"

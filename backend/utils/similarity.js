@@ -56,3 +56,26 @@ function topKByCosineFast(query, vectors, k) {
 }
 
 module.exports.topKByCosineFast = topKByCosineFast;
+
+// Top-k over a row-major Float32Array matrix (n rows x dim) with precomputed row norms.
+function topKFlat(query, matrix, norms, dim, n, k) {
+  const top = [];
+  const qm = magnitude(query);
+  if (qm === 0 || k <= 0) return top;
+  for (let i = 0; i < n; i++) {
+    const nm = norms[i];
+    const base = i * dim;
+    let dot = 0;
+    for (let j = 0; j < dim; j++) dot += query[j] * matrix[base + j];
+    const score = nm === 0 ? 0 : dot / (qm * nm);
+    if (top.length < k || score > top[top.length - 1].score) {
+      let pos = top.length;
+      while (pos > 0 && top[pos - 1].score < score) pos--;
+      top.splice(pos, 0, { index: i, score });
+      if (top.length > k) top.pop();
+    }
+  }
+  return top;
+}
+
+module.exports.topKFlat = topKFlat;

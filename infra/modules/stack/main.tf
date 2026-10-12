@@ -37,6 +37,14 @@ variable "backend_min_instances" {
   type    = number
   default = 0
 }
+variable "alert_email" {
+  type    = string
+  default = ""
+}
+variable "mail_from" {
+  type    = string
+  default = "Contexto <no-reply@example.com>"
+}
 variable "force_destroy_bucket" {
   type    = bool
   default = false
@@ -86,10 +94,12 @@ module "iam" {
   source     = "../iam"
   project_id = var.project_id
   service_accounts = {
-    "${var.prefix}-backend"  = { display_name = "Contexto API", project_roles = ["roles/logging.logWriter"] }
-    "${var.prefix}-worker"   = { display_name = "Contexto ingest worker", project_roles = ["roles/logging.logWriter"] }
-    "${var.prefix}-frontend" = { display_name = "Contexto web", project_roles = [] }
-    "${var.prefix}-push"     = { display_name = "Pub/Sub push identity", project_roles = [] }
+    "${var.prefix}-backend"   = { display_name = "Contexto API", project_roles = ["roles/logging.logWriter"] }
+    "${var.prefix}-worker"    = { display_name = "Contexto ingest worker", project_roles = ["roles/logging.logWriter"] }
+    "${var.prefix}-frontend"  = { display_name = "Contexto web", project_roles = [] }
+    "${var.prefix}-push"      = { display_name = "Pub/Sub push identity", project_roles = [] }
+    "${var.prefix}-jobs"      = { display_name = "Contexto scheduled jobs", project_roles = ["roles/logging.logWriter"] }
+    "${var.prefix}-scheduler" = { display_name = "Cloud Scheduler caller", project_roles = [] }
   }
   depends_on = [google_project_service.apis]
 }
@@ -101,6 +111,7 @@ module "secrets" {
     MONGODB_URI       = [local.sa["${var.prefix}-backend"], local.sa["${var.prefix}-worker"]]
     OPENAI_API_KEY    = [local.sa["${var.prefix}-backend"], local.sa["${var.prefix}-worker"]]
     ANTHROPIC_API_KEY = [local.sa["${var.prefix}-backend"]]
+    SMTP_URL          = [local.sa["${var.prefix}-jobs"]]
   }
   depends_on = [google_project_service.apis]
 }
@@ -134,8 +145,11 @@ module "backend" {
     FIREBASE_PROJECT_ID = var.project_id
     RAW_TEXT_BUCKET     = module.storage.bucket_name
   }
-  secret_env = module.secrets.secret_ids
-  depends_on = [module.secrets]
+  secret_env = {
+    MONGODB_URI       = module.secrets.secret_ids["MONGODB_URI"]
+    OPENAI_API_KEY    = module.secrets.secret_ids["OPENAI_API_KEY"]
+    ANTHROPIC_API_KEY = module.secrets.secret_ids["ANTHROPIC_API_KEY"]
+  }
 }
 
 module "worker" {
@@ -187,3 +201,53 @@ output "frontend_url" { value = module.frontend.url }
 output "worker_url" { value = module.worker.url }
 output "raw_text_bucket" { value = module.storage.bucket_name }
 output "service_accounts" { value = local.sa }
+# Daily reviews-due email: Cloud Scheduler -> Cloud Run job.
+module "reviews_due_job" {
+  source                = "../cloud_run_job"
+  project_id            = var.project_id
+  region                = var.region
+  name                  = "${var.prefix}-reviews-due"
+  service_account_email = local.sa["${var.prefix}-jobs"]
+  image                 = var.placeholder_image
+  command               = ["node", "jobs/reviewsDue.js"]
+  deletion_protection   = var.deletion_protection
+  env = {
+    APP_URL   = local.frontend_url
+    MAIL_FROM = var.mail_from
+  }
+  secret_env = {
+    MONGODB_URI = module.secrets.secret_ids["MONGODB_URI"]
+    SMTP_URL    = module.secrets.secret_ids["SMTP_URL"]
+  }
+}
+
+module "reviews_due_schedule" {
+  source                = "../scheduler"
+  project_id            = var.project_id
+  region                = var.region
+  name                  = "${var.prefix}-reviews-due-daily"
+  schedule              = "0 8 * * *"
+  job_name              = module.reviews_due_job.name
+  service_account_email = local.sa["${var.prefix}-scheduler"]
+  depends_on            = [google_project_service.apis]
+}
+
+module "monitoring" {
+  source              = "../monitoring"
+  project_id          = var.project_id
+  backend_service     = module.backend.name
+  worker_service      = module.worker.name
+  ingest_subscription = module.pubsub.ingest_subscription
+  dlq_subscription    = module.pubsub.dlq_subscription
+  alert_email         = var.alert_email
+  depends_on          = [google_project_service.apis]
+}
+
+module "logging_export" {
+  source     = "../logging_export"
+  project_id = var.project_id
+  depends_on = [google_project_service.apis]
+}
+
+output "slo" { value = module.monitoring.slo_name }
+output "log_dataset" { value = module.logging_export.dataset_id }

@@ -10,6 +10,8 @@ const DEFAULT_PRICING = {
   'claude-sonnet-4-20250514': { input: 3, output: 15 },
   // Assumed same as the previous Sonnet; verify against current pricing or set LLM_PRICING_JSON.
   'claude-sonnet-5-5': { input: 3, output: 15 },
+  // Approximate list price; verify against current pricing or set LLM_PRICING_JSON.
+  'claude-haiku-4-5-20251001': { input: 1, output: 5 },
 };
 function pricing() {
   try {

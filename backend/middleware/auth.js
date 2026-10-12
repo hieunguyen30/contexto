@@ -16,9 +16,10 @@ function resolveMode() {
 }
 
 function defaultVerifier() {
-  const admin = require('firebase-admin');
-  if (!admin.apps.length) admin.initializeApp({ projectId: process.env.FIREBASE_PROJECT_ID });
-  return (token) => admin.auth().verifyIdToken(token);
+  const { getApps, initializeApp } = require('firebase-admin/app');
+  const { getAuth } = require('firebase-admin/auth');
+  if (!getApps().length) initializeApp({ projectId: process.env.FIREBASE_PROJECT_ID });
+  return (token) => getAuth().verifyIdToken(token);
 }
 
 // First sign-in creates the User doc. Languages get defaults the user can change later.

@@ -55,8 +55,8 @@ steps:
       - --region=${_REGION}
       - --service-account=${_BACKEND_SA}@$PROJECT_ID.iam.gserviceaccount.com
       - --allow-unauthenticated
-      - --set-env-vars=CORS_ORIGIN=https://contexto-frontend-${_PROJECT_NUMBER}.${_REGION}.run.app,PUBSUB_TOPIC=ingest-requests,RAW_TEXT_BUCKET=${_RAW_TEXT_BUCKET}
-      - --set-secrets=MONGODB_URI=MONGODB_URI:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest,ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest
+      - --update-env-vars=CORS_ORIGIN=https://contexto-frontend-${_PROJECT_NUMBER}.${_REGION}.run.app,PUBSUB_TOPIC=ingest-requests,RAW_TEXT_BUCKET=${_RAW_TEXT_BUCKET}
+      - --update-secrets=MONGODB_URI=MONGODB_URI:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest,ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest
     waitFor: ['push-backend']
   - id: deploy-worker
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
@@ -71,8 +71,8 @@ steps:
       - --no-allow-unauthenticated   # only the Pub/Sub push identity may invoke
       - --timeout=300
       - --concurrency=4
-      - --set-env-vars=RAW_TEXT_BUCKET=${_RAW_TEXT_BUCKET}
-      - --set-secrets=MONGODB_URI=MONGODB_URI:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest
+      - --update-env-vars=RAW_TEXT_BUCKET=${_RAW_TEXT_BUCKET}
+      - --update-secrets=MONGODB_URI=MONGODB_URI:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest
     waitFor: ['push-worker']
   - id: deploy-frontend
     name: gcr.io/google.com/cloudsdktool/cloud-sdk

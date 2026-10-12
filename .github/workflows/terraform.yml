@@ -1,0 +1,80 @@
+name: terraform
+
+# PR: fmt + validate + plan (both envs, plan posted as a PR comment).
+# Merge to main: apply dev automatically; prod waits for approval on the "prod" GitHub Environment.
+#
+# One-time setup: Workload Identity Federation for GitHub -> GCP, then set repo variables
+#   WIF_PROVIDER   projects/<num>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
+#   TF_SA_DEV / TF_SA_PROD   Terraform service account email per project
+# and protect the "prod" environment with required reviewers.
+
+on:
+  pull_request:
+    paths: ['infra/**', '.github/workflows/terraform.yml']
+  push:
+    branches: [main]
+    paths: ['infra/**']
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        env: [dev, prod]
+    defaults:
+      run:
+        working-directory: infra/envs/${{ matrix.env }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ matrix.env == 'prod' && vars.TF_SA_PROD || vars.TF_SA_DEV }}
+      - run: terraform fmt -check -recursive ../..
+      - run: terraform init -backend-config=backend.hcl -input=false
+      - run: terraform validate
+      - id: plan
+        run: terraform plan -input=false -no-color -var-file=${{ matrix.env }}.tfvars -out=tfplan 2>&1 | tee plan.txt
+      - uses: actions/github-script@v7
+        if: always()
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('infra/envs/${{ matrix.env }}/plan.txt', 'utf8').slice(-60000);
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.issue.number,
+              body: `### terraform plan (${{ matrix.env }})\n\`\`\`\n${plan}\n\`\`\``,
+            });
+
+  apply:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1
+      matrix:
+        env: [dev, prod]
+    environment: ${{ matrix.env }}   # prod has required reviewers -> manual gate
+    defaults:
+      run:
+        working-directory: infra/envs/${{ matrix.env }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ matrix.env == 'prod' && vars.TF_SA_PROD || vars.TF_SA_DEV }}
+      - run: terraform init -backend-config=backend.hcl -input=false
+      - run: terraform apply -input=false -auto-approve -var-file=${{ matrix.env }}.tfvars

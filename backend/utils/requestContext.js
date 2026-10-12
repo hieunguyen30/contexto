@@ -8,6 +8,8 @@ const als = new AsyncLocalStorage();
 const DEFAULT_PRICING = {
   'text-embedding-3-small': { input: 0.02, output: 0 },
   'claude-sonnet-4-20250514': { input: 3, output: 15 },
+  // Assumed same as the previous Sonnet; verify against current pricing or set LLM_PRICING_JSON.
+  'claude-sonnet-5-5': { input: 3, output: 15 },
 };
 function pricing() {
   try {

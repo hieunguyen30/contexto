@@ -2,7 +2,8 @@ const Anthropic = require('@anthropic-ai/sdk');
 const logger = require('../utils/logger');
 const { recordUsage } = require('../utils/requestContext');
 
-const MODEL = 'claude-sonnet-4-20250514';
+// Override with ANTHROPIC_MODEL; old model IDs get retired and return 404 not_found_error.
+const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
 
 let client = null;
 function getClient() {

@@ -14,7 +14,7 @@ Learn a language from the things you actually want to read and watch. Paste in a
 
 ### AI-curated vocabulary
 
-- **Claude extraction** (`claude-sonnet-4-20250514`) — top 10 useful words per content, tuned to `beginner` / `intermediate` / `advanced`. Lemma forms, no proper nouns.
+- **Claude extraction** (`claude-sonnet-5-5`) — top 10 useful words per content, tuned to `beginner` / `intermediate` / `advanced`. Lemma forms, no proper nouns.
 - **Native-language aware** — translations land in your stored `native_language`.
 - **Source-grounded examples** — example sentences pulled from the original text where possible.
 - **Re-extractable per difficulty** — same content can yield a beginner *and* an advanced set.
@@ -62,7 +62,7 @@ Progress bar across the top tracks your position in the card.
 
 - **Frontend** — Next.js 15 (App Router) · TypeScript · Tailwind CSS · axios
 - **Backend** — Node.js · Express · Mongoose / MongoDB Atlas
-- **AI** — OpenAI `text-embedding-3-small` for retrieval, Anthropic `claude-sonnet-4-20250514` for vocab extraction, quiz generation, and chat
+- **AI** — OpenAI `text-embedding-3-small` for retrieval, Anthropic `claude-sonnet-5-5` for vocab extraction, quiz generation, and chat
 
 ```
 contexto/

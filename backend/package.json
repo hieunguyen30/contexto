@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node __tests__/manual.test.js && node __tests__/routes.test.js && node __tests__/worker.test.js && node __tests__/retrieval.test.js && node __tests__/retrieval-cache.test.js && node __tests__/auth.test.js && node __tests__/ops.test.js"
+    "test": "node __tests__/manual.test.js && node __tests__/routes.test.js && node __tests__/worker.test.js && node __tests__/retrieval.test.js && node __tests__/retrieval-cache.test.js && node __tests__/auth.test.js && node __tests__/ops.test.js && node __tests__/stats.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

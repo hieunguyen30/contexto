@@ -58,6 +58,26 @@ Progress bar across the top tracks your position in the card.
 - **Lean deps** — no LangChain, no Vercel AI SDK. Official OpenAI + Anthropic SDKs only.
 - **Strict types** — `tsc --noEmit` clean across the frontend.
 
+## Design system
+
+A feed-style layout: left sidebar (nav, streak, daily goal, language switcher), a central stream of "post" cards, and a right rail with today's practice prompt. On mobile the sidebar becomes a top bar plus a bottom tab bar.
+
+| Token | Light | Dark | Use |
+|---|---|---|---|
+| `canvas` | `#F8FAFC` | `#0F172A` | page background |
+| `surface` | `#FFFFFF` | `#1E293B` | cards |
+| `ink` / `muted` | `#0F172A` / `#64748B` | `#F1F5F9` / `#94A3B8` | text |
+| `primary` | Electric Cobalt `#2563EB` | `#60A5FA` | actions, active nav, progress |
+| `accent` | Indigo `#4F46E5` | `#818CF8` | prompt box, translations |
+| `flame` | Amber `#F59E0B` | `#FBBF24` | streak, "due" counters |
+| `mint` | Teal `#10B981` | `#34D399` | success, goal complete |
+
+- Colours are CSS variables (`app/globals.css`) wired into Tailwind (`tailwind.config.ts`), so every utility works in both themes and supports opacity (`bg-primary/10`). `flame-ink`/`mint-ink` are darker text-safe variants for light mode (contrast).
+- Dark mode: `class` strategy, saved in `localStorage`, defaults to the OS setting, applied by an inline script before paint (no flash). Cards get a glowing primary border on hover in dark mode instead of a shadow.
+- Fonts: **Plus Jakarta Sans** for UI, **Source Serif 4** for target-language text (words, example sentences, quiz prompts). Both load the Vietnamese subset.
+- Cards are `rounded-2xl`, 1px border, soft shadow; hover lifts 2px; buttons press down on `:active`; progress bars animate; `prefers-reduced-motion` is respected.
+- What the "community" parts map to, since content is private per user and there are no other learners: the vote column is **words / due counters**, the comment thread is **Chat**, vocabulary entries use a **thread-style rail**, and "peer feedback" is **AI tutor feedback** on a sentence you write in the daily prompt.
+
 ## Stack
 
 - **Frontend** — Next.js 15 (App Router) · TypeScript · Tailwind CSS · axios
@@ -135,6 +155,8 @@ All endpoints require `Authorization: Bearer <Firebase ID token>` unless noted (
 | GET | `/health` | — (no auth) | `{ status, service }` |
 | POST | `/api/content/ingest` | `{ url, source_type: "youtube"\|"article", target_language }` | **202** `{ content_id, status: "queued" }` — processing is async |
 | GET | `/api/content/:id/status` | — | `{ content_id, status: "queued"\|"processing"\|"ready"\|"failed", error, chunk_count, title }` |
+| GET | `/api/stats` | — | `{ streak_days, reviewed_today, daily_goal, due_count }` |
+| POST | `/api/practice/feedback` | `{ vocab_item_id, sentence }` (≤ 300 chars) | `{ feedback }` (tutor reply) |
 | GET | `/api/vocab/:id/pronunciation` | — | `audio/mpeg` (Cloud Text-to-Speech) |
 | GET | `/api/content/library` | — | `{ items: Content[] }` (each with `status`) |
 | GET | `/api/content/:id` | — | `Content` (no embeddings/chunks/raw_text) |

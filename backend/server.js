@@ -8,6 +8,8 @@ const requestLog = require('./middleware/requestLog');
 const contentRouter = require('./routes/content');
 const vocabRouter = require('./routes/vocab');
 const chatRouter = require('./routes/chat');
+const statsRouter = require('./routes/stats');
+const practiceRouter = require('./routes/practice');
 
 const app = express();
 
@@ -25,6 +27,8 @@ app.get('/health', (req, res) => {
 app.use('/api/content', contentRouter);
 app.use('/api/vocab', vocabRouter);
 app.use('/api/chat', chatRouter);
+app.use('/api/stats', statsRouter);
+app.use('/api/practice', practiceRouter);
 
 app.use((err, req, res, _next) => {
   logger.error('Unhandled request error', { err, method: req.method, path: req.originalUrl });

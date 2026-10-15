@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { chat, getContent, type ContentItem } from '@/lib/api';
+import { BackLink, ErrorNote, errorMessage } from '@/components/ui';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -22,10 +23,7 @@ export default function ChatPage() {
     if (!content_id) return;
     getContent(content_id)
       .then(setContent)
-      .catch((e: unknown) => {
-        const err = e as { response?: { data?: { error?: string } }; message?: string };
-        setError(err.response?.data?.error || err.message || 'Could not load content');
-      });
+      .catch((e) => setError(errorMessage(e, 'Could not load content')));
   }, [content_id]);
 
   useEffect(() => {
@@ -43,75 +41,71 @@ export default function ChatPage() {
     try {
       const { answer } = await chat(content._id, userText, content.language);
       setMessages((m) => [...m, { role: 'assistant', text: answer }]);
-    } catch (e: unknown) {
-      const err = e as { response?: { data?: { error?: string } }; message?: string };
-      setError(err.response?.data?.error || err.message || 'Chat failed');
+    } catch (e) {
+      setError(errorMessage(e, 'Chat failed'));
     } finally {
       setSending(false);
     }
   };
 
   return (
-    <main className="mx-auto flex h-[calc(100vh-4rem)] max-w-3xl flex-col px-6 py-6">
-      <div>
-        <div className="text-xs uppercase tracking-wide text-slate-400">
-          Chat · {content?.language ?? '…'}
-        </div>
-        <h1 className="mt-1 text-xl font-semibold tracking-tight">
-          {content?.title ?? 'Loading…'}
-        </h1>
+    <div className="flex h-[calc(100dvh-10rem)] flex-col lg:h-[calc(100dvh-3rem)]">
+      <BackLink href={content ? `/content/${content._id}` : '/dashboard'}>Back</BackLink>
+      <div className="mb-4">
+        <div className="text-xs font-bold uppercase tracking-widest text-primary">Chat · {content?.language ?? '…'}</div>
+        <h1 className="mt-1 line-clamp-2 text-xl font-extrabold leading-snug tracking-tight">{content?.title ?? 'Loading…'}</h1>
       </div>
 
-      <div
-        ref={scrollRef}
-        className="mt-4 flex-1 space-y-3 overflow-y-auto rounded border border-slate-200 bg-white p-4"
-      >
+      <div ref={scrollRef} className="card flex-1 space-y-4 overflow-y-auto p-5" aria-live="polite">
         {messages.length === 0 && (
-          <p className="text-sm text-slate-500">
-            Ask anything about this content — questions are answered using its text only.
-          </p>
+          <div className="grid h-full place-items-center text-center">
+            <div className="max-w-xs">
+              <div className="text-3xl">💬</div>
+              <p className="mt-2 text-sm text-muted">
+                Ask anything about this text. Answers come from the content itself, in {content?.language ?? 'your language'}.
+              </p>
+            </div>
+          </div>
         )}
         {messages.map((m, i) => (
-          <div
-            key={i}
-            className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
+          <div key={i} className={`flex animate-pop-in ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
-              className={`max-w-[80%] whitespace-pre-wrap rounded px-3 py-2 text-sm ${
+              className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 leading-relaxed ${
                 m.role === 'user'
-                  ? 'bg-slate-900 text-white'
-                  : 'bg-slate-100 text-slate-900'
+                  ? 'rounded-br-md bg-primary text-sm text-primary-ink'
+                  : 'rounded-bl-md bg-raised font-serif text-base'
               }`}
             >
               {m.text}
             </div>
           </div>
         ))}
-        {sending && <p className="text-xs text-slate-400">Thinking…</p>}
+        {sending && (
+          <div className="flex justify-start" role="status" aria-label="Thinking">
+            <div className="flex gap-1.5 rounded-2xl rounded-bl-md bg-raised px-4 py-3.5">
+              {[0, 1, 2].map((d) => (
+                <span key={d} className="h-2 w-2 animate-bounce rounded-full bg-muted" style={{ animationDelay: `${d * 120}ms` }} />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
-      {error && (
-        <p className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </p>
-      )}
+      {error && <div className="mt-3"><ErrorNote>{error}</ErrorNote></div>}
 
       <form onSubmit={send} className="mt-3 flex gap-2">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask a question…"
-          className="flex-1 rounded border border-slate-300 px-3 py-2"
+          className="input flex-1"
           disabled={!content || sending}
+          aria-label="Your question"
         />
-        <button
-          type="submit"
-          disabled={!content || sending || !input.trim()}
-          className="rounded bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
-        >
+        <button type="submit" disabled={!content || sending || !input.trim()} className="btn btn-primary">
           Send
         </button>
       </form>
-    </main>
+    </div>
   );
 }

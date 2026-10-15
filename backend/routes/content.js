@@ -1,6 +1,6 @@
 const express = require('express');
 const { Types } = require('mongoose');
-const { Content } = require('../models');
+const { Content, VocabItem } = require('../models');
 const { publishIngest } = require('../services/queue');
 const logger = require('../utils/logger');
 
@@ -95,6 +95,25 @@ router.get('/library', async (req, res, next) => {
     )
       .sort({ created_at: -1 })
       .lean();
+
+    // Per-content word counts for the feed cards.
+    const now = new Date();
+    const counts = await VocabItem.aggregate([
+      { $match: { user_id: userId, content_id: { $in: items.map((i) => i._id) } } },
+      {
+        $group: {
+          _id: '$content_id',
+          vocab_count: { $sum: 1 },
+          due_count: { $sum: { $cond: [{ $lte: ['$next_review_date', now] }, 1, 0] } },
+        },
+      },
+    ]);
+    const byContent = new Map(counts.map((c) => [String(c._id), c]));
+    for (const it of items) {
+      const c = byContent.get(String(it._id));
+      it.vocab_count = c ? c.vocab_count : 0;
+      it.due_count = c ? c.due_count : 0;
+    }
 
     return res.json({ items });
   } catch (err) {

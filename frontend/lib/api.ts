@@ -19,7 +19,26 @@ export type SourceType = 'youtube' | 'pdf' | 'article';
 
 export type IngestStatus = 'queued' | 'processing' | 'ready' | 'failed';
 
+export interface Stats {
+  streak_days: number;
+  reviewed_today: number;
+  daily_goal: number;
+  due_count: number;
+}
+
+export async function getStats(): Promise<Stats> {
+  const { data } = await api.get('/api/stats');
+  return data;
+}
+
+export async function practiceFeedback(vocab_item_id: string, sentence: string): Promise<{ feedback: string }> {
+  const { data } = await api.post('/api/practice/feedback', { vocab_item_id, sentence });
+  return data;
+}
+
 export interface ContentItem {
+  vocab_count?: number;
+  due_count?: number;
   status?: IngestStatus;
   error?: string | null;
   chunk_count?: number;

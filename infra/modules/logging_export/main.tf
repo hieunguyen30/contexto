@@ -1,6 +1,5 @@
 # Exports structured app logs (requests, LLM usage/cost, quiz attempts, ingestion outcomes) to BigQuery.
 # Cloud Run stdout lands in the table `run_googleapis_com_stdout`, created on the first matching log entry.
-# Example analytics queries: docs/analytics.sql
 variable "project_id" { type = string }
 variable "location" {
   type    = string

@@ -1,3 +1,8 @@
 
 # Personal notes (interview prep etc.): never commit
 private/
+
+# Documentation is private: only README.md is published
+docs/
+*.md
+!README.md

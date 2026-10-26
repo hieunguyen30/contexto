@@ -26,7 +26,7 @@ Learn a language from the things you actually want to read and watch. Paste a Yo
 | Infrastructure | Terraform (modules, `dev` / `prod` environments, remote state), GitHub Actions |
 | Testing | Node test scripts with supertest and fakes, k6 load tests |
 
-Flow in one line: **browser → Cloud Run API → Pub/Sub → Cloud Run worker (scrape, chunk, embed) → MongoDB**, with an idempotent worker, retries with backoff and a dead-letter queue. Details in [docs/architecture.md](docs/architecture.md).
+Flow in one line: **browser → Cloud Run API → Pub/Sub → Cloud Run worker (scrape, chunk, embed) → MongoDB**, with an idempotent worker, retries with backoff and a dead-letter queue.
 
 ## Project layout
 
@@ -36,8 +36,7 @@ contexto/
 ├── frontend/       Next.js app (feed, upload, content, quiz, chat)
 ├── infra/          Terraform modules and dev/prod environments
 ├── loadtest/       k6 scripts + mock LLM server
-├── scripts/        manual GCP bootstrap helpers
-└── docs/           architecture, deploy, benchmarks, analytics
+└── scripts/        manual GCP bootstrap helpers
 ```
 
 ## Run it locally
@@ -66,13 +65,6 @@ cd backend && npm test
 
 Eight suites covering the chunker, SM-2, retrieval and its cache, worker idempotency, auth, stats and the email job. None need a database, API keys or GCP.
 
-## Docs
+## Status
 
-| | |
-|---|---|
-| [docs/architecture.md](docs/architecture.md) | Diagram, ingestion state machine, auth, SLO and alerts, design system |
-| [docs/deploy.md](docs/deploy.md) | Deploying to Google Cloud, first-deploy gotchas, tearing down |
-| [docs/benchmarks.md](docs/benchmarks.md) | Retrieval and load-test results (before/after) |
-| [docs/analytics.sql](docs/analytics.sql) | BigQuery queries: cost per endpoint, hardest words, retention |
-
-> The Google Cloud dev environment was deployed and tested, then destroyed to stop costs. It rebuilds from `infra/` with the steps in `docs/deploy.md`.
+The Google Cloud dev environment was deployed and tested end to end, then torn down to stop costs. It rebuilds from `infra/` with Terraform and `cloudbuild.yaml`.
